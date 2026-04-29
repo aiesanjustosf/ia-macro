@@ -25,6 +25,36 @@ MACRO_DYC_TOTAL_RE = re.compile(
     re.IGNORECASE,
 )
 
+HOJA_NRO_RE = re.compile(r"\bHoja\s+Nro\.?:\s*(\d+)\b", re.IGNORECASE)
+
+
+def macro_extract_all_lines_ordered(file_like):
+    """Devuelve las líneas en el orden real del resumen Macro.
+
+    Algunos PDFs de Macro vienen físicamente en orden inverso (Hoja 12, 11, ..., 1).
+    Para que el cálculo por delta de saldo sea correcto, primero se reordena por Hoja Nro.
+    """
+    raw = extract_all_lines(file_like)
+    pages = {}
+    page_order = []
+    for pi, ln in raw:
+        if pi not in pages:
+            pages[pi] = []
+            page_order.append(pi)
+        pages[pi].append(ln)
+
+    def page_key(pi):
+        joined = " ".join(pages.get(pi, []))
+        m = HOJA_NRO_RE.search(joined)
+        if m:
+            return (0, int(m.group(1)), pi)
+        return (1, pi, pi)
+
+    ordered = []
+    for pi in sorted(page_order, key=page_key):
+        ordered.extend((pi, ln) for ln in pages[pi])
+    return ordered
+
 
 def _normalize_account_token(tok: str) -> str:
     return re.sub(rf"\s*{HYPH}\s*", "-", tok)
@@ -45,7 +75,7 @@ def _normalize_title_from_pending(pending_title: str) -> str:
 
 def macro_extract_account_whitelist(file_like) -> dict:
     info = {}
-    all_lines = extract_all_lines(file_like)
+    all_lines = macro_extract_all_lines_ordered(file_like)
     in_table = False
     last_tipo = None
     for _, ln in all_lines:
@@ -76,7 +106,7 @@ def macro_extract_account_whitelist(file_like) -> dict:
 def macro_split_account_blocks(file_like):
     whitelist = macro_extract_account_whitelist(file_like)
     white_set = set(whitelist.keys())
-    all_lines = extract_all_lines(file_like)
+    all_lines = macro_extract_all_lines_ordered(file_like)
     accounts, order = {}, []
     current_nro = None
     pending_title = None

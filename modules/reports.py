@@ -61,7 +61,7 @@ def _build_movements_dataframe(lines: list[str]) -> tuple[pd.DataFrame, pd.Times
 
 
 def _download_excel(df: pd.DataFrame, label: str, file_name: str, key: str):
-    try:
+    def build_with_xlsxwriter() -> bytes:
         import xlsxwriter  # noqa: F401
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
@@ -81,10 +81,44 @@ def _download_excel(df: pd.DataFrame, label: str, file_name: str, key: str):
             if "fecha" in df.columns:
                 j = df.columns.get_loc("fecha")
                 ws.set_column(j, j, 14, date_fmt)
-        st.download_button(label, data=output.getvalue(), file_name=file_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key=key)
+        return output.getvalue()
+
+    def build_with_openpyxl() -> bytes:
+        import openpyxl  # noqa: F401
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Movimientos")
+            ws = writer.sheets["Movimientos"]
+            for col_idx, col_name in enumerate(df.columns, start=1):
+                max_len = max(len(str(col_name)), *(len(str(v)) for v in df[col_name].astype(str)))
+                ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 2, 45)
+                if col_name in ["debito", "credito", "importe", "saldo", "delta_saldo"]:
+                    for cell in ws.iter_cols(min_col=col_idx, max_col=col_idx, min_row=2):
+                        for c in cell:
+                            c.number_format = '#,##0.00'
+                if col_name == "fecha":
+                    for cell in ws.iter_cols(min_col=col_idx, max_col=col_idx, min_row=2):
+                        for c in cell:
+                            c.number_format = 'DD/MM/YYYY'
+        return output.getvalue()
+
+    try:
+        data = build_with_xlsxwriter()
     except Exception:
-        csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button(label.replace("Excel", "CSV"), data=csv_bytes, file_name=file_name.replace(".xlsx", ".csv"), mime="text/csv", use_container_width=True, key=f"{key}_csv")
+        try:
+            data = build_with_openpyxl()
+        except Exception as e:
+            st.error(f"No se pudo generar el Excel. Revisá requirements.txt: xlsxwriter u openpyxl. Error: {e}")
+            return
+
+    st.download_button(
+        label,
+        data=data,
+        file_name=file_name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        key=key,
+    )
 
 
 def render_account_report(account_title: str, account_number: str, acc_id: str, lines: list[str]):
@@ -107,9 +141,9 @@ def render_account_report(account_title: str, account_number: str, acc_id: str, 
         with c2: metric_full("Total créditos (+)", f"$ {fmt_ar(total_creditos)}")
         with c3: metric_full("Total débitos (–)", f"$ {fmt_ar(total_debitos)}")
         c4, c5, c6 = st.columns(3)
-        with c4: st.metric("Saldo final (PDF)", f"$ {fmt_ar(saldo_final_visto)}")
-        with c5: st.metric("Saldo final calculado", f"$ {fmt_ar(saldo_final_calculado)}")
-        with c6: st.metric("Diferencia", f"$ {fmt_ar(diferencia)}")
+        with c4: metric_full("Saldo final (PDF)", f"$ {fmt_ar(saldo_final_visto)}")
+        with c5: metric_full("Saldo final calculado", f"$ {fmt_ar(saldo_final_calculado)}")
+        with c6: metric_full("Diferencia", f"$ {fmt_ar(diferencia)}")
         st.success("Conciliado.") if cuadra else st.error("No cuadra la conciliación.")
         if pd.notna(fecha_cierre):
             st.caption(f"Cierre según PDF: {fecha_cierre.strftime('%d/%m/%Y')}")
@@ -134,9 +168,9 @@ def render_account_report(account_title: str, account_number: str, acc_id: str, 
     with c2: metric_full("Total créditos (+)", f"$ {fmt_ar(total_creditos)}")
     with c3: metric_full("Total débitos (–)", f"$ {fmt_ar(total_debitos)}")
     c4, c5, c6 = st.columns(3)
-    with c4: st.metric("Saldo final (PDF)", f"$ {fmt_ar(saldo_final_visto)}")
-    with c5: st.metric("Saldo final calculado", f"$ {fmt_ar(saldo_final_calculado)}")
-    with c6: st.metric("Diferencia", f"$ {fmt_ar(diferencia)}")
+    with c4: metric_full("Saldo final (PDF)", f"$ {fmt_ar(saldo_final_visto)}")
+    with c5: metric_full("Saldo final calculado", f"$ {fmt_ar(saldo_final_calculado)}")
+    with c6: metric_full("Diferencia", f"$ {fmt_ar(diferencia)}")
     st.success("Conciliado.") if cuadra else st.error("No cuadra la conciliación.")
     if pd.notna(fecha_cierre):
         st.caption(f"Cierre según PDF: {fecha_cierre.strftime('%d/%m/%Y')}")
@@ -156,26 +190,26 @@ def render_account_report(account_title: str, account_number: str, acc_id: str, 
     sircreb = float(df_sorted.loc[df_sorted["Clasificación"].eq("SIRCREB"), "debito"].sum())
 
     m1, m2, m3 = st.columns(3)
-    with m1: st.metric("Neto Comisiones 21%", f"$ {fmt_ar(net21)}")
-    with m2: st.metric("IVA 21%", f"$ {fmt_ar(iva21)}")
-    with m3: st.metric("Bruto 21%", f"$ {fmt_ar(net21 + iva21)}")
+    with m1: metric_full("Neto Comisiones 21%", f"$ {fmt_ar(net21)}")
+    with m2: metric_full("IVA 21%", f"$ {fmt_ar(iva21)}")
+    with m3: metric_full("Bruto 21%", f"$ {fmt_ar(net21 + iva21)}")
     n1, n2, n3 = st.columns(3)
-    with n1: st.metric("Neto Comisiones 10,5%", f"$ {fmt_ar(net105)}")
-    with n2: st.metric("IVA 10,5%", f"$ {fmt_ar(iva105)}")
-    with n3: st.metric("Bruto 10,5%", f"$ {fmt_ar(net105 + iva105)}")
+    with n1: metric_full("Neto Comisiones 10,5%", f"$ {fmt_ar(net105)}")
+    with n2: metric_full("IVA 10,5%", f"$ {fmt_ar(iva105)}")
+    with n3: metric_full("Bruto 10,5%", f"$ {fmt_ar(net105 + iva105)}")
     o1, o2, o3 = st.columns(3)
-    with o1: st.metric("Percepciones de IVA (RG 3337 / RG 2408)", f"$ {fmt_ar(percep_iva)}")
-    with o2: st.metric("Ley 25.413 / DyC", f"$ {fmt_ar(ley_25413)}")
-    with o3: st.metric("SIRCREB", f"$ {fmt_ar(sircreb)}")
+    with o1: metric_full("Percepciones de IVA", f"$ {fmt_ar(percep_iva)}")
+    with o2: metric_full("Ley 25.413 / DyC", f"$ {fmt_ar(ley_25413)}")
+    with o3: metric_full("SIRCREB", f"$ {fmt_ar(sircreb)}")
 
     dyc_pdf = find_macro_dyc_total_from_lines(lines)
     if not np.isnan(dyc_pdf):
         st.caption("Control Ley 25.413 / DyC contra total informado por Banco Macro")
         diferencia_dyc = ley_25413 - float(dyc_pdf)
         d1, d2, d3 = st.columns(3)
-        with d1: st.metric("DyC calculado", f"$ {fmt_ar(ley_25413)}")
-        with d2: st.metric("DyC informado PDF", f"$ {fmt_ar(dyc_pdf)}")
-        with d3: st.metric("Diferencia", f"$ {fmt_ar(diferencia_dyc)}")
+        with d1: metric_full("DyC calculado", f"$ {fmt_ar(ley_25413)}")
+        with d2: metric_full("DyC informado PDF", f"$ {fmt_ar(dyc_pdf)}")
+        with d3: metric_full("Diferencia", f"$ {fmt_ar(diferencia_dyc)}")
         st.success("Control DyC conciliado.") if abs(diferencia_dyc) < 0.01 else st.warning("Control DyC no coincide con el total informado por el PDF.")
 
     st.caption("Detalle de movimientos")
