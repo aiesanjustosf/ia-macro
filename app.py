@@ -3,8 +3,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from modules.extraction import extract_all_lines, text_from_pdf
-from modules.parsing import macro_split_account_blocks
+from modules.extraction import text_from_pdf
+from modules.parsing import macro_extract_all_lines_ordered, macro_split_account_blocks
 from modules.reports import render_account_report
 
 HERE = Path(__file__).parent
@@ -48,7 +48,7 @@ blocks = macro_split_account_blocks(io.BytesIO(data))
 
 if not blocks:
     st.warning("No se detectaron encabezados de cuenta Macro. Se intentará procesar todo el PDF como una única cuenta.")
-    lines = [line for _, line in extract_all_lines(io.BytesIO(data))]
+    lines = [line for _, line in macro_extract_all_lines_ordered(io.BytesIO(data))]
     render_account_report("CUENTA (PDF completo)", "s/n", "macro-pdf-completo", lines)
 else:
     st.caption(f"Información de su/s Cuenta/s: {len(blocks)} cuenta(s) detectada(s).")
